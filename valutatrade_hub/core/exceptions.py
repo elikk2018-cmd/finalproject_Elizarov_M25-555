@@ -49,3 +49,13 @@ class ApiRequestError(ValutaTradeError):
     def __init__(self, reason: str):
         self.reason = reason
         super().__init__(f"Ошибка при обращении к внешнему API: {reason}")
+
+
+class ConfigurationError(ValutaTradeError):
+    """Raised when there is a configuration error."""
+    pass
+
+
+class DatabaseError(ValutaTradeError):
+    """Raised when there is a database error."""
+    pass

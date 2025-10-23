@@ -1,17 +1,18 @@
-"""Command-line interface implementation."""
+"""Enhanced CLI interface with new features."""
 import argparse
 import sys
 from getpass import getpass
 from prettytable import PrettyTable
 
 from ..core.session import session_manager
-from ..core.usecases import user_manager, portfolio_manager
-from ..core.exceptions import ValutaTradeError
+from ..core.usecases import user_manager, portfolio_manager, rate_manager
+from ..core.exceptions import ValutaTradeError, CurrencyNotFoundError, InsufficientFundsError
 from ..core.utils import ExchangeRates, format_currency_amount
+from ..core.currencies import CurrencyRegistry, get_currency
 
 
 class CLI:
-    """Command Line Interface for ValutaTrade Hub."""
+    """Enhanced Command Line Interface for ValutaTrade Hub."""
     
     def __init__(self):
         self.parser = self._create_parser()
@@ -29,6 +30,7 @@ class CLI:
   buy --currency BTC --amount 0.1
   sell --currency BTC --amount 0.05
   get-rate --from USD --to BTC
+  list-currencies
             """
         )
         
@@ -69,6 +71,13 @@ class CLI:
         # whoami command
         subparsers.add_parser('whoami', help='Показать текущего пользователя')
         
+        # list-currencies command
+        subparsers.add_parser('list-currencies', help='Показать все доступные валюты')
+        
+        # currency-info command
+        currency_parser = subparsers.add_parser('currency-info', help='Информация о валюте')
+        currency_parser.add_argument('--currency', required=True, help='Код валюты')
+        
         return parser
     
     def run(self, args=None):
@@ -99,6 +108,10 @@ class CLI:
                 self.handle_get_rate(parsed_args)
             elif parsed_args.command == 'whoami':
                 self.handle_whoami()
+            elif parsed_args.command == 'list-currencies':
+                self.handle_list_currencies()
+            elif parsed_args.command == 'currency-info':
+                self.handle_currency_info(parsed_args)
             else:
                 self.parser.print_help()
         except ValutaTradeError as e:
@@ -186,12 +199,20 @@ class CLI:
         
         currency_code = args.currency.upper()
         
+        # Validate currency
+        try:
+            currency_info = rate_manager.get_currency_info(currency_code)
+            print(f"Информация о валюте: {currency_info}")
+        except CurrencyNotFoundError as e:
+            print(f"ОШИБКА: {e}")
+            print("   Используйте 'list-currencies' для просмотра доступных валют.")
+            return
+        
         # Add currency to portfolio if it doesn't exist
         if currency_code not in portfolio_manager.get_user_portfolio(user.user_id).wallets:
             portfolio_manager.add_currency_to_portfolio(user.user_id, currency_code)
         
-        # For now, we'll just deposit the currency (simulating purchase)
-        # In a real implementation, this would deduct from USD balance
+        # Deposit the currency
         portfolio_manager.deposit_to_wallet(user.user_id, currency_code, args.amount)
         
         # Calculate estimated cost in USD
@@ -219,24 +240,35 @@ class CLI:
         
         currency_code = args.currency.upper()
         
-        # Withdraw the currency
-        portfolio_manager.withdraw_from_wallet(user.user_id, currency_code, args.amount)
-        
-        # Calculate estimated revenue in USD
+        # Validate currency exists
         try:
-            rate = ExchangeRates.get_rate(currency_code, 'USD')
-            revenue = args.amount * rate
-        except ValutaTradeError:
-            revenue = 0
+            get_currency(currency_code)
+        except CurrencyNotFoundError as e:
+            print(f"ОШИБКА: {e}")
+            return
         
-        portfolio = portfolio_manager.get_user_portfolio(user.user_id)
-        new_balance = portfolio.get_wallet(currency_code).balance
-        
-        print(f"УСПЕХ: Продажа выполнена: {format_currency_amount(args.amount, currency_code)}")
-        if revenue > 0:
-            print(f"   Оценочная выручка: {revenue:,.2f} USD")
-        print(f"   Изменения в портфеле:")
-        print(f"   - {currency_code}: стало {format_currency_amount(new_balance, currency_code)}")
+        try:
+            # Withdraw the currency
+            portfolio_manager.withdraw_from_wallet(user.user_id, currency_code, args.amount)
+            
+            # Calculate estimated revenue in USD
+            try:
+                rate = ExchangeRates.get_rate(currency_code, 'USD')
+                revenue = args.amount * rate
+            except ValutaTradeError:
+                revenue = 0
+            
+            portfolio = portfolio_manager.get_user_portfolio(user.user_id)
+            new_balance = portfolio.get_wallet(currency_code).balance
+            
+            print(f"УСПЕХ: Продажа выполнена: {format_currency_amount(args.amount, currency_code)}")
+            if revenue > 0:
+                print(f"   Оценочная выручка: {revenue:,.2f} USD")
+            print(f"   Изменения в портфеле:")
+            print(f"   - {currency_code}: стало {format_currency_amount(new_balance, currency_code)}")
+            
+        except InsufficientFundsError as e:
+            print(f"ОШИБКА: {e}")
     
     def handle_get_rate(self, args):
         """Handle exchange rate lookup."""
@@ -244,15 +276,72 @@ class CLI:
         to_currency = args.to_currency.upper()
         
         try:
-            rate = ExchangeRates.get_rate(from_currency, to_currency)
-            reverse_rate = ExchangeRates.get_rate(to_currency, from_currency)
+            # Validate currencies
+            from_curr = get_currency(from_currency)
+            to_curr = get_currency(to_currency)
+            
+            rate = rate_manager.get_exchange_rate(from_currency, to_currency)
+            reverse_rate = rate_manager.get_exchange_rate(to_currency, from_currency)
             
             print(f"КУРС {from_currency} -> {to_currency}: {rate:.6f}")
             print(f"   Обратный курс {to_currency} -> {from_currency}: {reverse_rate:.6f}")
+            print(f"   {from_curr.get_display_info()}")
+            print(f"   {to_curr.get_display_info()}")
             
+        except CurrencyNotFoundError as e:
+            print(f"ОШИБКА: {e}")
+            print("   Используйте 'list-currencies' для просмотра доступных валют.")
         except ValutaTradeError as e:
             print(f"ОШИБКА: {e}")
-            print("   Попробуйте обновить курсы позже или проверьте коды валют.")
+    
+    def handle_list_currencies(self):
+        """Handle list currencies command."""
+        currencies = CurrencyRegistry.get_all_currencies()
+        
+        fiat_table = PrettyTable()
+        fiat_table.field_names = ["Код", "Название", "Страна эмитент"]
+        
+        crypto_table = PrettyTable()
+        crypto_table.field_names = ["Код", "Название", "Алгоритм", "Капитализация"]
+        
+        for code, currency in currencies.items():
+            if hasattr(currency, 'issuing_country'):
+                # Fiat currency
+                fiat_table.add_row([code, currency.name, currency.issuing_country])
+            else:
+                # Crypto currency
+                mcap_str = f"{currency.market_cap:.2e}" if currency.market_cap > 0 else "N/A"
+                crypto_table.add_row([code, currency.name, currency.algorithm, mcap_str])
+        
+        print("ФИАТНЫЕ ВАЛЮТЫ:")
+        print(fiat_table)
+        print("\nКРИПТОВАЛЮТЫ:")
+        print(crypto_table)
+        print(f"\nВсего доступно валют: {len(currencies)}")
+    
+    def handle_currency_info(self, args):
+        """Handle currency info command."""
+        currency_code = args.currency.upper()
+        
+        try:
+            currency = get_currency(currency_code)
+            print(f"ИНФОРМАЦИЯ О ВАЛЮТЕ {currency_code}:")
+            print(f"  {currency.get_display_info()}")
+            
+            # Show current rates to major currencies
+            print("\nТЕКУЩИЕ КУРСЫ:")
+            major_currencies = ['USD', 'EUR', 'BTC']
+            for major in major_currencies:
+                if major != currency_code:
+                    try:
+                        rate = rate_manager.get_exchange_rate(currency_code, major)
+                        print(f"  {currency_code} -> {major}: {rate:.6f}")
+                    except ValutaTradeError:
+                        continue
+                        
+        except CurrencyNotFoundError as e:
+            print(f"ОШИБКА: {e}")
+            print("   Используйте 'list-currencies' для просмотра доступных валют.")
 
 
 def main():

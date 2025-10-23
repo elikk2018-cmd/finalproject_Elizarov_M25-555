@@ -9,6 +9,7 @@ packages = [{include = "valutatrade_hub"}]
 [tool.poetry.dependencies]
 python = "^3.8"
 prettytable = "^3.9.0"
+toml = "^0.10.2"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.0"
@@ -32,7 +33,17 @@ select = [
     "I",  # isort
     "B",  # flake8-bugbear
 ]
-ignore = ["E501"]  # Allow long lines for now
+ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.valutatrade]
+data_dir = "data"
+rates_ttl_seconds = 300
+default_base_currency = "USD"
+log_file = "logs/valutatrade.log"
+log_level = "INFO"
+log_format = "simple"
+max_log_size_mb = 10
+log_backup_count = 5
