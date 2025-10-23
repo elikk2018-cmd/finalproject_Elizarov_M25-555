@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "finalproject-elizarov-m25-555"
+version = "0.1.0"
+description = "ValutaTrade Hub - Currency trading simulation platform"
+authors = ["Elizarov <elizarov@example.com>"]
+readme = "README.md"
+packages = [{include = "valutatrade_hub"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+prettytable = "^3.9.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.1.0"
+
+[tool.poetry.scripts]
+project = "main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+]
+ignore = ["E501"]  # Allow long lines for now
+
+[tool.ruff.format]
+quote-style = "double"
