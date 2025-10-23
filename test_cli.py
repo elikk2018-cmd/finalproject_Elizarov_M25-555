@@ -24,13 +24,13 @@ def test_cli_commands():
     """Test all CLI commands."""
     print("🚀 ТЕСТИРОВАНИЕ CLI ИНТЕРФЕЙСА")
     print("=" * 50)
-    
+
     # Cleanup test data
     if os.path.exists("data/users.json"):
         os.remove("data/users.json")
     if os.path.exists("data/portfolios.json"):
         os.remove("data/portfolios.json")
-    
+
     # Test 1: Help command
     print("\n1. Testing help command...")
     returncode, stdout, stderr = run_command(["--help"])
@@ -38,7 +38,7 @@ def test_cli_commands():
         print("   ✅ Help command works")
     else:
         print("   ❌ Help command failed")
-    
+
     # Test 2: Register user
     print("\n2. Testing user registration...")
     returncode, stdout, stderr = run_command(["register", "--username", "testuser", "--password", "testpass"])
@@ -48,7 +48,7 @@ def test_cli_commands():
         print("   ❌ User registration failed")
         print(f"      stdout: {stdout}")
         print(f"      stderr: {stderr}")
-    
+
     # Test 3: Login
     print("\n3. Testing user login...")
     returncode, stdout, stderr = run_command(["login", "--username", "testuser", "--password", "testpass"])
@@ -58,7 +58,7 @@ def test_cli_commands():
         print("   ❌ User login failed")
         print(f"      stdout: {stdout}")
         print(f"      stderr: {stderr}")
-    
+
     # Test 4: Whoami command
     print("\n4. Testing whoami command...")
     returncode, stdout, stderr = run_command(["whoami"])
@@ -66,7 +66,7 @@ def test_cli_commands():
         print("   ✅ Whoami command works")
     else:
         print("   ❌ Whoami command failed")
-    
+
     # Test 5: Get rate command
     print("\n5. Testing get-rate command...")
     returncode, stdout, stderr = run_command(["get-rate", "--from", "USD", "--to", "BTC"])
@@ -74,7 +74,7 @@ def test_cli_commands():
         print("   ✅ Get-rate command works")
     else:
         print("   ❌ Get-rate command failed")
-    
+
     # Test 6: Buy command
     print("\n6. Testing buy command...")
     returncode, stdout, stderr = run_command(["buy", "--currency", "BTC", "--amount", "0.1"])
@@ -84,7 +84,7 @@ def test_cli_commands():
         print("   ❌ Buy command failed")
         print(f"      stdout: {stdout}")
         print(f"      stderr: {stderr}")
-    
+
     # Test 7: Show portfolio command
     print("\n7. Testing show-portfolio command...")
     returncode, stdout, stderr = run_command(["show-portfolio"])
@@ -92,7 +92,7 @@ def test_cli_commands():
         print("   ✅ Show-portfolio command works")
     else:
         print("   ❌ Show-portfolio command failed")
-    
+
     # Test 8: Logout command
     print("\n8. Testing logout command...")
     returncode, stdout, stderr = run_command(["logout"])
@@ -100,7 +100,7 @@ def test_cli_commands():
         print("   ✅ Logout command works")
     else:
         print("   ❌ Logout command failed")
-    
+
     print("\n" + "=" * 50)
     print("🎯 ТЕСТИРОВАНИЕ CLI ЗАВЕРШЕНО")
 

@@ -9,16 +9,16 @@ import time
 
 def run_interactive_commands(commands):
     """Run commands in interactive mode using subprocess with input."""
-    
+
     # Clean previous data
     if os.path.exists("data/users.json"):
         os.remove("data/users.json")
     if os.path.exists("data/portfolios.json"):
         os.remove("data/portfolios.json")
-    
+
     print("ЗАПУСК ИНТЕРАКТИВНОЙ ДЕМОНСТРАЦИИ")
     print("=" * 50)
-    
+
     # Start interactive process
     process = subprocess.Popen(
         [sys.executable, "main.py"],
@@ -28,13 +28,13 @@ def run_interactive_commands(commands):
         text=True,
         bufsize=1
     )
-    
+
     try:
         for command in commands:
             print(f"\n>>> {command}")
             process.stdin.write(command + '\n')
             process.stdin.flush()
-            
+
             # Read output
             output = []
             while True:
@@ -44,18 +44,18 @@ def run_interactive_commands(commands):
                 if 'valutatrade' in line and '>' in line:
                     break  # Stop at next prompt
                 output.append(line.strip())
-            
+
             # Print output
             for line in output:
                 if line and '==================================================' not in line:
                     print(f"   {line}")
-            
+
             time.sleep(0.5)
-        
+
         # Exit
         process.stdin.write('exit\n')
         process.stdin.flush()
-        
+
     finally:
         process.terminate()
         process.wait()
@@ -79,9 +79,9 @@ def main():
         "logout",
         "exit"
     ]
-    
+
     run_interactive_commands(commands)
-    
+
     print("\n" + "=" * 50)
     print("ДЕМОНСТРАЦИЯ ЗАВЕРШЕНА!")
     print("\nДля интерактивного режима используйте:")

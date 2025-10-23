@@ -6,7 +6,7 @@ print("=" * 40)
 
 modules_to_test = [
     "valutatrade_hub.core.currencies",
-    "valutatrade_hub.core.exceptions", 
+    "valutatrade_hub.core.exceptions",
     "valutatrade_hub.core.models",
     "valutatrade_hub.core.session",
     "valutatrade_hub.core.utils",

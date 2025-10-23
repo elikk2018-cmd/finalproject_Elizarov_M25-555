@@ -3,8 +3,9 @@ import hashlib
 import secrets
 import string
 from datetime import datetime
-from .exceptions import CurrencyNotFoundError
+
 from .currencies import get_currency
+from .exceptions import CurrencyNotFoundError
 
 
 def generate_salt(length: int = 16) -> str:
@@ -57,7 +58,7 @@ def format_currency_amount(amount: float, currency_code: str) -> str:
 
 class ExchangeRates:
     """Temporary exchange rates stub with currency validation."""
-    
+
     _rates = {
         # Fiat to USD
         "EUR_USD": 1.0786,
@@ -66,38 +67,38 @@ class ExchangeRates:
         "JPY_USD": 0.0067,
         "CNY_USD": 0.1389,
         "USD_USD": 1.0,
-        
+
         # Crypto to USD
         "BTC_USD": 59337.21,
         "ETH_USD": 3720.00,
         "SOL_USD": 145.12,
         "ADA_USD": 0.45,
         "DOT_USD": 8.20,
-        
+
         # Cross rates (calculated)
         "EUR_BTC": 0.00001817,
         "BTC_EUR": 55027.42,
     }
-    
+
     @classmethod
     def get_rate(cls, from_currency: str, to_currency: str) -> float:
         """Get exchange rate between two currencies with validation."""
         # Validate currencies
         get_currency(from_currency)
         get_currency(to_currency)
-        
+
         if from_currency == to_currency:
             return 1.0
-            
+
         pair = f"{from_currency}_{to_currency}"
         if pair in cls._rates:
             return cls._rates[pair]
-            
+
         # Try reverse rate
         reverse_pair = f"{to_currency}_{from_currency}"
         if reverse_pair in cls._rates:
             return 1.0 / cls._rates[reverse_pair]
-        
+
         # Calculate through USD if possible
         if from_currency != "USD" and to_currency != "USD":
             try:
@@ -106,9 +107,9 @@ class ExchangeRates:
                 return rate_to_usd * rate_from_usd
             except CurrencyNotFoundError:
                 pass
-            
+
         raise CurrencyNotFoundError(f"Курс для пары {from_currency}/{to_currency} не найден")
-    
+
     @classmethod
     def add_rate(cls, from_currency: str, to_currency: str, rate: float):
         """Add or update exchange rate."""

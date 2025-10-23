@@ -4,8 +4,9 @@ ValutaTrade Hub - Main entry point
 Currency trading simulation platform
 """
 import sys
-from valutatrade_hub.cli.interface import CLI
+
 from valutatrade_hub.cli.interactive import run_interactive
+from valutatrade_hub.cli.interface import CLI
 
 
 def main():
