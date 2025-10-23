@@ -4,11 +4,16 @@
     "wallets": {
       "USD": {
         "currency_code": "USD",
-        "balance": 1000.0
-      },
-      "BTC": {
-        "currency_code": "BTC",
-        "balance": 0.1
+        "balance": 1100.0
+      }
+    }
+  },
+  {
+    "user_id": 2,
+    "wallets": {
+      "USD": {
+        "currency_code": "USD",
+        "balance": 500.0
       }
     }
   }

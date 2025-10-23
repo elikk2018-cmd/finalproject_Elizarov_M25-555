@@ -1,24 +1,32 @@
-cat > README.md << 'EOF'
-# ValutaTrade Hub
+echo "
 
-Валютный торговый кошелек - финальный проект по Python (M25-555)
+## Интерактивный режим
 
-## Описание проекта
+Для интерактивной работы используйте:
 
-ValutaTrade Hub - это консольное приложение для симуляции торговли валютами. 
-Пользователи могут регистрироваться, управлять портфелем валют, совершать сделки 
-и отслеживать актуальные курсы.
+\`\`\`bash
+python main.py
+# или
+python main.py --interactive
+\`\`\`
 
-## Технологии
+В интерактивном режиме доступны те же команды, но без префиксов \`--\`:
 
-- Python 3.8+
-- Poetry (управление зависимостями)
-- Ruff (линтинг и форматирование)
-- PrettyTable (красивый вывод в консоли)
+\`\`\`
+valutatrade> register --username alice --password 1234
+valutatrade> login --username alice --password 1234  
+valutatrade(alice)> buy --currency BTC --amount 0.1
+valutatrade(alice)> show_portfolio
+valutatrade(alice)> exit
+\`\`\`
 
-## Установка и запуск
+## Одиночные команды
 
-1. Клонируйте репозиторий:
-```bash
-git clone <repository-url>
-cd finalproject_elizarov_M25-555
+Для выполнения одиночных команд:
+
+\`\`\`bash
+python main.py register --username alice --password 1234
+python main.py login --username alice --password 1234
+python main.py show-portfolio
+\`\`\`
+" >> README.md
