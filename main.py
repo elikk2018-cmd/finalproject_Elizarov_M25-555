@@ -1,26 +1,16 @@
-#!/usr/bin/env python3
+"""Entry point for Poetry script `project`.
+
+Poetry config uses:
+[tool.poetry.scripts]
+project = "main:main"
 """
-ValutaTrade Hub - Main entry point
-Currency trading simulation platform
-"""
-import sys
 
-from valutatrade_hub.cli.interactive import run_interactive
-from valutatrade_hub.cli.interface import CLI
+from valutatrade_hub.cli.interface import main as cli_main
 
 
-def main():
-    """Основная функция приложения."""
-    if len(sys.argv) == 1:
-        # No arguments provided, start interactive mode
-        run_interactive()
-    elif len(sys.argv) == 2 and sys.argv[1] in ['-i', '--interactive']:
-        # Explicit interactive mode
-        run_interactive()
-    else:
-        # Arguments provided, use single-command CLI
-        cli = CLI()
-        cli.run()
+def main() -> None:
+    """Run CLI application."""
+    cli_main()
 
 
 if __name__ == "__main__":

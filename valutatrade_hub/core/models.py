@@ -1,221 +1,187 @@
-"""Data models for users, wallets, and portfolios."""
-from typing import Dict
+"""Domain models: User, Wallet, Portfolio."""
 
-from .exceptions import InsufficientFundsError
-from .utils import ExchangeRates, generate_salt, get_current_datetime, hash_password
+from __future__ import annotations
+
+import hashlib
+import secrets
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from valutatrade_hub.core.exceptions import InsufficientFundsError
+from valutatrade_hub.core.utils import normalize_currency_code, parse_positive_decimal
+
+
+@dataclass(frozen=True)
+class UserDump:
+    """Serializable representation of a User (for users.json)."""
+
+    user_id: int
+    username: str
+    hashed_password: str
+    salt: str
+    registration_date: str
 
 
 class User:
-    """User model representing a system user."""
+    """User entity with private fields and salted SHA-256 password hash."""
 
-    def __init__(self, user_id: int, username: str, hashed_password: str,
-                 salt: str, registration_date: str = None):
-        self._user_id = user_id
-        self._username = username
+    def __init__(
+        self,
+        user_id: int,
+        username: str,
+        hashed_password: str,
+        salt: str,
+        registration_date: datetime,
+    ) -> None:
+        self._user_id = int(user_id)
+        self.username = username
         self._hashed_password = hashed_password
         self._salt = salt
-        self._registration_date = registration_date or get_current_datetime()
+        self._registration_date = registration_date
+
+    @classmethod
+    def create_new(cls, user_id: int, username: str, password: str) -> User:
+        """Create a new user with generated salt and hashed password."""
+        if not password or len(password) < 4:
+            raise ValueError("Пароль должен быть не короче 4 символов")
+
+        salt = secrets.token_urlsafe(8)
+        hashed = cls._hash_password(password=password, salt=salt)
+
+        return cls(
+            user_id=user_id,
+            username=username,
+            hashed_password=hashed,
+            salt=salt,
+            registration_date=datetime.now(),
+        )
+
+    @staticmethod
+    def _hash_password(password: str, salt: str) -> str:
+        """One-way pseudo-hash: sha256(password + salt)."""
+        return hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
 
     @property
     def user_id(self) -> int:
+        """Unique user id."""
         return self._user_id
 
     @property
     def username(self) -> str:
+        """Username."""
         return self._username
 
     @username.setter
-    def username(self, value: str):
-        if not value or len(value.strip()) == 0:
-            raise ValueError("Имя пользователя не может быть пустым")
-        self._username = value
+    def username(self, value: str) -> None:
+        """Set username with validation."""
+        if not value or not value.strip():
+            raise ValueError("Имя не может быть пустым")
+        self._username = value.strip()
 
-    @property
-    def hashed_password(self) -> str:
-        return self._hashed_password
-
-    @property
-    def salt(self) -> str:
-        return self._salt
-
-    @property
-    def registration_date(self) -> str:
-        return self._registration_date
-
-    def get_user_info(self) -> dict:
-        """Get user information (without password)."""
+    def get_user_info(self) -> dict[str, Any]:
+        """Return user info without password."""
         return {
             "user_id": self._user_id,
             "username": self._username,
-            "registration_date": self._registration_date
+            "registration_date": self._registration_date.isoformat(),
         }
-
-    def change_password(self, new_password: str):
-        """Change user password with new hashing."""
-        if len(new_password) < 4:
-            raise ValueError("Пароль должен быть не короче 4 символов")
-
-        new_salt = generate_salt()
-        new_hashed_password = hash_password(new_password, new_salt)
-
-        self._hashed_password = new_hashed_password
-        self._salt = new_salt
 
     def verify_password(self, password: str) -> bool:
-        """Verify if provided password matches stored hash."""
-        test_hash = hash_password(password, self._salt)
-        return test_hash == self._hashed_password
+        """Verify password against stored hash."""
+        return self._hash_password(password=password, salt=self._salt) == self._hashed_password
 
-    def to_dict(self) -> dict:
-        """Convert user to dictionary for JSON storage."""
-        return {
-            "user_id": self._user_id,
-            "username": self._username,
-            "hashed_password": self._hashed_password,
-            "salt": self._salt,
-            "registration_date": self._registration_date
-        }
+    def change_password(self, new_password: str) -> None:
+        """Change password and update hash."""
+        if not new_password or len(new_password) < 4:
+            raise ValueError("Пароль должен быть не короче 4 символов")
+        self._hashed_password = self._hash_password(password=new_password, salt=self._salt)
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'User':
-        """Create User instance from dictionary."""
-        return cls(
-            user_id=data["user_id"],
-            username=data["username"],
-            hashed_password=data["hashed_password"],
-            salt=data["salt"],
-            registration_date=data["registration_date"]
+    def to_dump(self) -> UserDump:
+        """Serialize for JSON storage."""
+        return UserDump(
+            user_id=self._user_id,
+            username=self._username,
+            hashed_password=self._hashed_password,
+            salt=self._salt,
+            registration_date=self._registration_date.isoformat(),
         )
 
 
 class Wallet:
-    """Wallet model for managing a single currency balance."""
+    """Wallet for a single currency."""
 
-    def __init__(self, currency_code: str, balance: float = 0.0):
-        self.currency_code = currency_code.upper()
-        self._balance = float(balance)
+    def __init__(self, currency_code: str, balance: Decimal = Decimal("0")) -> None:
+        self.currency_code = normalize_currency_code(currency_code)
+        self.balance = balance
 
     @property
-    def balance(self) -> float:
+    def balance(self) -> Decimal:
+        """Current balance."""
         return self._balance
 
     @balance.setter
-    def balance(self, value: float):
-        if not isinstance(value, (int, float)):
-            raise TypeError("Баланс должен быть числом")
+    def balance(self, value: Decimal) -> None:
+        """Set balance with validation (no negative)."""
+        if not isinstance(value, Decimal):
+            raise ValueError("balance должен быть Decimal")
         if value < 0:
-            raise ValueError("Баланс не может быть отрицательным")
-        self._balance = float(value)
+            raise ValueError("balance не может быть отрицательным")
+        self._balance = value
 
-    def deposit(self, amount: float):
-        """Deposit funds into wallet."""
-        if amount <= 0:
-            raise ValueError("Сумма пополнения должна быть положительной")
-        self.balance += amount
+    def deposit(self, amount: Decimal) -> None:
+        """Deposit amount (must be positive)."""
+        amt = parse_positive_decimal(amount)
+        self._balance += amt
 
-    def withdraw(self, amount: float):
-        """Withdraw funds from wallet."""
-        if amount <= 0:
-            raise ValueError("Сумма снятия должна быть положительной")
-        if amount > self._balance:
+    def withdraw(self, amount: Decimal) -> None:
+        """Withdraw amount if enough funds (must be positive)."""
+        amt = parse_positive_decimal(amount)
+        if self._balance < amt:
             raise InsufficientFundsError(
-                available=self._balance,
-                required=amount,
-                currency_code=self.currency_code
+                code=self.currency_code,
+                available=float(self._balance),
+                required=float(amt),
             )
-        self.balance -= amount
+        self._balance -= amt
 
-    def get_balance_info(self) -> dict:
-        """Get wallet balance information."""
-        return {
-            "currency_code": self.currency_code,
-            "balance": self._balance
-        }
-
-    def to_dict(self) -> dict:
-        """Convert wallet to dictionary for JSON storage."""
-        return {
-            "currency_code": self.currency_code,
-            "balance": self._balance
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Wallet':
-        """Create Wallet instance from dictionary."""
-        return cls(
-            currency_code=data["currency_code"],
-            balance=data["balance"]
-        )
+    def get_balance_info(self) -> dict[str, Any]:
+        """Return wallet info."""
+        return {"currency_code": self.currency_code, "balance": float(self._balance)}
 
 
 class Portfolio:
-    """Portfolio model for managing all user wallets."""
+    """Portfolio with wallets of a single user."""
 
-    def __init__(self, user_id: int, wallets: Dict[str, Wallet] = None):
-        self._user_id = user_id
-        self._wallets = wallets or {}
+    def __init__(self, user_id: int, wallets: dict[str, Wallet] | None = None) -> None:
+        self._user_id = int(user_id)
+        self._wallets: dict[str, Wallet] = wallets or {}
 
     @property
     def user_id(self) -> int:
+        """User id (read-only)."""
         return self._user_id
 
     @property
-    def wallets(self) -> Dict[str, Wallet]:
-        return self._wallets.copy()  # Return copy to prevent external modification
+    def wallets(self) -> dict[str, Wallet]:
+        """Copy of wallets mapping."""
+        return self._wallets.copy()
 
     def add_currency(self, currency_code: str) -> Wallet:
-        """Add new currency wallet to portfolio."""
-        currency_code = currency_code.upper()
-        if currency_code in self._wallets:
-            raise ValueError(f"Валюта '{currency_code}' уже есть в портфеле")
-
-        wallet = Wallet(currency_code)
-        self._wallets[currency_code] = wallet
-        return wallet
+        """Add wallet for currency if missing and return it."""
+        code = normalize_currency_code(currency_code)
+        if code not in self._wallets:
+            self._wallets[code] = Wallet(code)
+        return self._wallets[code]
 
     def get_wallet(self, currency_code: str) -> Wallet:
-        """Get wallet by currency code."""
-        currency_code = currency_code.upper()
-        if currency_code not in self._wallets:
-            raise ValueError(f"Кошелек для валюты '{currency_code}' не найден")
-        return self._wallets[currency_code]
+        """Get wallet for currency (auto-create if missing)."""
+        return self.add_currency(currency_code)
 
-    def get_total_value(self, base_currency: str = 'USD') -> float:
-        """Calculate total portfolio value in base currency."""
-        total_value = 0.0
-
-        for currency_code, wallet in self._wallets.items():
-            if currency_code == base_currency:
-                total_value += wallet.balance
-            else:
-                try:
-                    rate = ExchangeRates.get_rate(currency_code, base_currency)
-                    total_value += wallet.balance * rate
-                except Exception:
-                    # If rate not available, skip this currency
-                    continue
-
-        return total_value
-
-    def to_dict(self) -> dict:
-        """Convert portfolio to dictionary for JSON storage."""
-        wallets_dict = {}
-        for currency_code, wallet in self._wallets.items():
-            wallets_dict[currency_code] = wallet.to_dict()
-
+    def to_json_payload(self) -> dict[str, Any]:
+        """Serialize portfolio for portfolios.json."""
         return {
             "user_id": self._user_id,
-            "wallets": wallets_dict
+            "wallets": {c: {"balance": float(w.balance)} for c, w in self._wallets.items()},
         }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Portfolio':
-        """Create Portfolio instance from dictionary."""
-        wallets = {}
-        for currency_code, wallet_data in data["wallets"].items():
-            wallets[currency_code] = Wallet.from_dict(wallet_data)
-
-        return cls(
-            user_id=data["user_id"],
-            wallets=wallets
-        )

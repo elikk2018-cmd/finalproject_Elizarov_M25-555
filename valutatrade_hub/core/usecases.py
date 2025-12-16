@@ -1,222 +1,239 @@
-"""Enhanced business logic with comprehensive logging and error handling."""
-from ..decorators import log_action, require_authentication, validate_currency
-from ..infra.database import db
-from .currencies import CurrencyRegistry, get_currency
-from .exceptions import (
-    AuthenticationError,
-    CurrencyNotFoundError,
-    DatabaseError,
-    InsufficientFundsError,
-    UserNotFoundError,
-    ValidationError,
-)
-from .models import Portfolio, User, Wallet
-from .utils import generate_salt, hash_password, validate_password, validate_username
+"""Usecases: register/login/buy/sell/show-portfolio/get-rate.
+
+Rules:
+- CLI does not contain business logic; it calls these usecases.
+- Storage is JSON files via DatabaseManager.
+- Rates are taken from data/rates.json with TTL.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import ApiRequestError, AuthenticationError
+from valutatrade_hub.core.models import Portfolio, User, Wallet
+from valutatrade_hub.core.session import session_manager
+from valutatrade_hub.core.utils import normalize_currency_code, parse_positive_decimal
+from valutatrade_hub.decorators import log_action, require_auth
+from valutatrade_hub.infra.database import db
+from valutatrade_hub.infra.settings import settings
 
 
-class UserManager:
-    """Enhanced UserManager with comprehensive logging and validation."""
+class UsersUsecase:
+    """User registration and login."""
 
-    def __init__(self):
-        self.users_file = "users"
+    @log_action("REGISTER")
+    def register(self, username: str, password: str) -> User:
+        """Register a new user and create an empty portfolio."""
+        users: list[dict[str, Any]] = db.read_list("users")
 
-    @log_action(operation="USER_REGISTRATION", verbose=True)
-    def register_user(self, username: str, password: str) -> User:
-        """Register a new user with enhanced validation and logging."""
-        # Validate inputs
-        if not validate_username(username):
-            raise ValidationError("username", username, "must be at least 3 characters and contain no spaces")
+        if any(u.get("username") == username for u in users):
+            raise ValueError(f"Имя пользователя '{username}' уже занято")
 
-        if not validate_password(password):
-            raise ValidationError("password", "***", "must be at least 4 characters")
+        next_id = max((u.get("user_id", 0) for u in users), default=0) + 1
+        user = User.create_new(user_id=next_id, username=username, password=password)
 
-        # Check if username already exists
-        existing_user = db.find_entity("users", "username", username)
-        if existing_user:
-            raise ValidationError("username", username, "already exists")
+        users.append(asdict(user.to_dump()))
+        db.write_list("users", users)
 
-        # Create new user in transaction
-        try:
-            with db.transaction() as transaction:
-                users = db.read_data("users")
-                user_id = max([user["user_id"] for user in users], default=0) + 1
-
-                salt = generate_salt()
-                hashed_password = hash_password(password, salt)
-
-                user = User(
-                    user_id=user_id,
-                    username=username,
-                    hashed_password=hashed_password,
-                    salt=salt
-                )
-
-                # Save user
-                transaction.add_operation({
-                    'type': 'update',
-                    'entity': 'users',
-                    'key': 'user_id',
-                    'value': user_id,
-                    'data': user.to_dict()
-                })
-
-                # Create empty portfolio for user
-                portfolio = Portfolio(user_id)
-                transaction.add_operation({
-                    'type': 'update',
-                    'entity': 'portfolios',
-                    'key': 'user_id',
-                    'value': user_id,
-                    'data': portfolio.to_dict()
-                })
-
-                transaction.commit()
-
-            return user
-
-        except Exception as e:
-            raise DatabaseError("user_registration", "users", str(e))
-
-    @log_action(operation="USER_LOGIN")
-    def authenticate_user(self, username: str, password: str) -> User:
-        """Authenticate user with enhanced error handling and logging."""
-        user_data = db.find_entity("users", "username", username)
-        if not user_data:
-            raise UserNotFoundError(username=username)
-
-        user = User.from_dict(user_data)
-        if not user.verify_password(password):
-            raise AuthenticationError("Неверный пароль")
+        portfolios = db.read_list("portfolios")
+        portfolios.append({"user_id": user.user_id, "wallets": {}})
+        db.write_list("portfolios", portfolios)
 
         return user
 
-    @log_action(operation="GET_USER_BY_ID")
-    def get_user_by_id(self, user_id: int) -> User:
-        """Get user by ID with logging."""
-        user_data = db.find_entity("users", "user_id", user_id)
-        if not user_data:
-            raise UserNotFoundError(user_id=user_id)
+    @log_action("LOGIN")
+    def login(self, username: str, password: str) -> None:
+        """Login and set in-memory session."""
+        users: list[dict[str, Any]] = db.read_list("users")
+        raw = next((u for u in users if u.get("username") == username), None)
+        if raw is None:
+            raise AuthenticationError(f"Пользователь '{username}' не найден")
 
-        return User.from_dict(user_data)
+        user = User(
+            user_id=int(raw["user_id"]),
+            username=str(raw["username"]),
+            hashed_password=str(raw["hashed_password"]),
+            salt=str(raw["salt"]),
+            registration_date=datetime.fromisoformat(str(raw["registration_date"])),
+        )
+
+        if not user.verify_password(password):
+            raise AuthenticationError("Неверный пароль")
+
+        session_manager.login(user_id=user.user_id, username=user.username)
 
 
-class PortfolioManager:
-    """Enhanced PortfolioManager with currency validation and transaction support."""
+class PortfolioUsecase:
+    """Trading and portfolio operations."""
 
-    def __init__(self):
-        self.portfolios_file = "portfolios"
+    def _load_portfolio(self, user_id: int) -> Portfolio:
+        portfolios = db.read_list("portfolios")
+        raw = next((p for p in portfolios if p.get("user_id") == user_id), None)
+        if raw is None:
+            return Portfolio(user_id=user_id, wallets={})
 
-    @require_authentication
-    def get_user_portfolio(self, user_id: int) -> Portfolio:
-        """Get user's portfolio with authentication check."""
-        portfolio_data = db.find_entity("portfolios", "user_id", user_id)
-        if not portfolio_data:
-            # Create empty portfolio if not exists
-            portfolio = Portfolio(user_id)
-            db.update_entity("portfolios", "user_id", user_id, portfolio.to_dict())
-            return portfolio
-
-        return Portfolio.from_dict(portfolio_data)
-
-    def _save_user_portfolio(self, portfolio: Portfolio):
-        """Save user portfolio with transaction support."""
-        db.update_entity("portfolios", "user_id", portfolio.user_id, portfolio.to_dict())
-
-    @log_action(operation="ADD_CURRENCY_TO_PORTFOLIO")
-    @require_authentication
-    @validate_currency('currency_code')
-    def add_currency_to_portfolio(self, user_id: int, currency_code: str) -> Wallet:
-        """Add currency to user's portfolio with comprehensive validation."""
-        # Validate currency exists (handled by decorator)
-        currency = get_currency(currency_code)
-
-        portfolio = self.get_user_portfolio(user_id)
-        wallet = portfolio.add_currency(currency_code)
-        self._save_user_portfolio(portfolio)
-
-        return wallet
-
-    @log_action(operation="DEPOSIT_TO_WALLET", verbose=True)
-    @require_authentication
-    @validate_currency('currency_code')
-    def deposit_to_wallet(self, user_id: int, currency_code: str, amount: float):
-        """Deposit funds to user's wallet with validation and logging."""
-        if amount <= 0:
-            raise ValidationError("amount", amount, "must be positive")
-
-        portfolio = self.get_user_portfolio(user_id)
-
-        # Create wallet if it doesn't exist
-        if currency_code not in portfolio.wallets:
-            portfolio.add_currency(currency_code)
-
-        wallet = portfolio.get_wallet(currency_code)
-        wallet.deposit(amount)
-        self._save_user_portfolio(portfolio)
-
-    @log_action(operation="WITHDRAW_FROM_WALLET", verbose=True)
-    @require_authentication
-    @validate_currency('currency_code')
-    def withdraw_from_wallet(self, user_id: int, currency_code: str, amount: float):
-        """Withdraw funds from user's wallet with comprehensive error handling."""
-        if amount <= 0:
-            raise ValidationError("amount", amount, "must be positive")
-
-        portfolio = self.get_user_portfolio(user_id)
-
-        try:
-            wallet = portfolio.get_wallet(currency_code)
-        except ValueError:
-            raise ValidationError("currency_code", currency_code, "wallet not found")
-
-        # Check balance before withdrawal
-        if wallet.balance < amount:
-            raise InsufficientFundsError(
-                available=wallet.balance,
-                required=amount,
-                currency_code=currency_code,
-                operation="withdrawal"
+        wallets: dict[str, Wallet] = {}
+        raw_wallets = raw.get("wallets") or {}
+        for code, w in raw_wallets.items():
+            wallets[code] = Wallet(
+                currency_code=code, balance=Decimal(str(w.get("balance", 0)))
             )
+        return Portfolio(user_id=user_id, wallets=wallets)
 
-        wallet.withdraw(amount)
-        self._save_user_portfolio(portfolio)
+    def _save_portfolio(self, portfolio: Portfolio) -> None:
+        portfolios = db.read_list("portfolios")
+        for i, p in enumerate(portfolios):
+            if p.get("user_id") == portfolio.user_id:
+                portfolios[i] = portfolio.to_json_payload()
+                db.write_list("portfolios", portfolios)
+                return
+        portfolios.append(portfolio.to_json_payload())
+        db.write_list("portfolios", portfolios)
+
+    @require_auth
+    @log_action("BUY", verbose=True)
+    def buy(
+        self, currency_code: str, amount: Decimal, base: str = "USD"
+    ) -> dict[str, Any]:
+        """Buy currency: increases wallet balance by amount."""
+        code = normalize_currency_code(currency_code)
+        base_code = normalize_currency_code(base)
+
+        get_currency(code)
+        get_currency(base_code)
+
+        amt = parse_positive_decimal(amount)
+
+        user = session_manager.current_user
+        if user is None:
+            raise AuthenticationError("Сначала выполните login")
+
+        portfolio = self._load_portfolio(user.user_id)
+        wallet = portfolio.get_wallet(code)
+
+        old_balance = wallet.balance
+        wallet.deposit(amt)
+
+        rate, updated_at = RatesUsecase().get_rate(code, base_code)
+        estimated_cost = float(amt) * rate
+
+        self._save_portfolio(portfolio)
+
+        return {
+            "currency": code,
+            "amount": float(amt),
+            "old_balance": float(old_balance),
+            "new_balance": float(wallet.balance),
+            "rate": rate,
+            "base": base_code,
+            "updated_at": updated_at,
+            "estimated_cost": estimated_cost,
+        }
+
+    @require_auth
+    @log_action("SELL", verbose=True)
+    def sell(
+        self, currency_code: str, amount: Decimal, base: str = "USD"
+    ) -> dict[str, Any]:
+        """Sell currency: decreases wallet balance by amount (requires funds)."""
+        code = normalize_currency_code(currency_code)
+        base_code = normalize_currency_code(base)
+
+        get_currency(code)
+        get_currency(base_code)
+
+        amt = parse_positive_decimal(amount)
+
+        user = session_manager.current_user
+        if user is None:
+            raise AuthenticationError("Сначала выполните login")
+
+        portfolio = self._load_portfolio(user.user_id)
+        wallet = portfolio.get_wallet(code)
+
+        old_balance = wallet.balance
+        wallet.withdraw(amt)
+
+        rate, updated_at = RatesUsecase().get_rate(code, base_code)
+        estimated_proceeds = float(amt) * rate
+
+        self._save_portfolio(portfolio)
+
+        return {
+            "currency": code,
+            "amount": float(amt),
+            "old_balance": float(old_balance),
+            "new_balance": float(wallet.balance),
+            "rate": rate,
+            "base": base_code,
+            "updated_at": updated_at,
+            "estimated_proceeds": estimated_proceeds,
+        }
+
+    @require_auth
+    def show_portfolio(self, base: str = "USD") -> tuple[Portfolio, dict[str, float], float]:
+        """Return portfolio + per-wallet value in base + total."""
+        base_code = normalize_currency_code(base)
+        get_currency(base_code)
+
+        user = session_manager.current_user
+        if user is None:
+            raise AuthenticationError("Сначала выполните login")
+
+        portfolio = self._load_portfolio(user.user_id)
+
+        rates = RatesUsecase()
+        values: dict[str, float] = {}
+        total = 0.0
+
+        for code, wallet in portfolio.wallets.items():
+            if code == base_code:
+                value = float(wallet.balance)
+            else:
+                rate, _ = rates.get_rate(code, base_code)
+                value = float(wallet.balance) * rate
+            values[code] = value
+            total += value
+
+        return portfolio, values, total
 
 
-class RateManager:
-    """Enhanced RateManager with comprehensive error handling."""
+class RatesUsecase:
+    """Rates access with TTL based on settings."""
 
-    def __init__(self):
-        self.rates_file = "rates"
+    def _pair_key(self, from_code: str, to_code: str) -> str:
+        return f"{from_code}_{to_code}"
 
-    @log_action(operation="GET_EXCHANGE_RATE")
-    @validate_currency('from_currency')
-    @validate_currency('to_currency')
-    def get_exchange_rate(self, from_currency: str, to_currency: str) -> float:
-        """Get exchange rate between two currencies with validation."""
-        from .utils import ExchangeRates
+    def _is_fresh(self, last_refresh_iso: str) -> bool:
+        ttl = int(settings.get("ratesttlseconds", 300))
+        last = datetime.fromisoformat(last_refresh_iso)
+        return (datetime.now() - last) <= timedelta(seconds=ttl)
 
-        try:
-            rate = ExchangeRates.get_rate(from_currency, to_currency)
-            return rate
-        except CurrencyNotFoundError:
-            # Fallback to basic rate calculation for known currencies
-            if from_currency == to_currency:
-                return 1.0
-            raise
+    def get_rate(self, from_code: str, to_code: str) -> tuple[float, str]:
+        """Get rate from cache rates.json; fails if missing/expired."""
+        frm = normalize_currency_code(from_code)
+        to = normalize_currency_code(to_code)
 
-    @log_action(operation="GET_CURRENCY_INFO")
-    @validate_currency('currency_code')
-    def get_currency_info(self, currency_code: str) -> str:
-        """Get currency display information."""
-        currency = get_currency(currency_code)
-        return currency.get_display_info()
+        get_currency(frm)
+        get_currency(to)
 
-    def get_supported_currencies(self) -> dict:
-        """Get all supported currencies."""
-        return CurrencyRegistry.get_all_currencies()
+        data = db.read_obj("rates", default={})
 
+        last_refresh = data.get("last_refresh")
+        if not last_refresh:
+            raise ApiRequestError("Кеш курсов пуст. Выполните update-rates")
 
-# Global instances for easy access
-user_manager = UserManager()
-portfolio_manager = PortfolioManager()
-rate_manager = RateManager()
+        if not self._is_fresh(str(last_refresh)):
+            raise ApiRequestError("Кеш курсов устарел. Выполните update-rates")
+
+        pair = self._pair_key(frm, to)
+        rec = data.get(pair)
+        if rec is None:
+            raise ApiRequestError(f"Курс {frm}→{to} недоступен. Выполните update-rates")
+
+        return float(rec["rate"]), str(rec["updated_at"])

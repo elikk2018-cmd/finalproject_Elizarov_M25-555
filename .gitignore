@@ -1,51 +1,29 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual environments
+# Virtualenvs
 .venv/
 venv/
 env/
 
-# Poetry
-poetry.lock
+# Build artifacts
+dist/
+build/
+*.egg-info/
 
-# Project specific
-data/*.json
-!data/users.json
-!data/portfolios.json
-!data/rates.json
-!data/exchange_rates.json
+# Ruff cache (важно по ТЗ)
+.ruff_cache/
 
-# Logs
+# Logs / runtime
 logs/
 *.log
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# OS / IDE
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+
+# Secrets
+.env

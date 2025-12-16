@@ -1,49 +1,30 @@
 [tool.poetry]
-name = "finalproject-elizarov-m25-555"
+name = "finalproject_elizarov_M25-555"
 version = "0.1.0"
-description = "ValutaTrade Hub - Currency trading simulation platform"
+description = "ValutaTrade Hub — CLI платформа для симуляции торговли валютами (Core + Parser Service)"
 authors = ["Elizarov <elizarov@example.com>"]
 readme = "README.md"
-packages = [{include = "valutatrade_hub"}]
+packages = [{ include = "valutatrade_hub" }]
 
 [tool.poetry.dependencies]
-python = "^3.8"
-prettytable = "^3.9.0"
-toml = "^0.10.2"
+python = "^3.13"
+requests = "^2.31.0"
+prettytable = "^3.10.0"
 
 [tool.poetry.group.dev.dependencies]
-ruff = "^0.1.0"
+ruff = "^0.6.9"
 
 [tool.poetry.scripts]
 project = "main:main"
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
 [tool.ruff]
 line-length = 88
-target-version = "py38"
+target-version = "py313"
 
 [tool.ruff.lint]
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-]
+select = ["E", "F", "B", "I", "N", "UP"]
 ignore = ["E501"]
 
-[tool.ruff.format]
-quote-style = "double"
-
-[tool.valutatrade]
-data_dir = "data"
-rates_ttl_seconds = 300
-default_base_currency = "USD"
-log_file = "logs/valutatrade.log"
-log_level = "INFO"
-log_format = "simple"
-max_log_size_mb = 10
-log_backup_count = 5
+[build-system]
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"
